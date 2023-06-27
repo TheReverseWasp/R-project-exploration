@@ -1,0 +1,210 @@
+---
+title: "NYPD - Shooting project"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+# NYPD Shooting analysis and prediction
+
+This project is made for the course DTSA-5301 Data Science in the field.
+
+## Libraries to use
+
+First, let's import the libraries I will use for this project.
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+```
+
+## Loading data
+
+In the first step, let's load the data from the data source.
+
+```{r}
+url = 'https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD'
+
+nypd_dataframe = read.csv(url)
+head(nypd_dataframe)
+```
+
+First lets look if there are null variables.
+
+```{r}
+apply(is.na(nypd_dataframe), 2, sum)
+```
+Look! Latitude and Longitude and Jurisdiction code has nulls. Let's replace it.
+
+```{r}
+nypd_dataframe <- nypd_dataframe %>%
+  mutate(Longitude = if_else(is.na(Longitude), mean(Longitude), Longitude),
+         Latitude = if_else(is.na(Latitude), mean(Latitude), Latitude),
+         JURISDICTION_CODE = if_else(is.na(JURISDICTION_CODE), mean(JURISDICTION_CODE), JURISDICTION_CODE))
+```
+
+## Visualizing the data
+
+For this project I aim to make a predictor of how much I am in danger giving my geo position, race, sex, and age. So... Let's explore the data.
+
+### Geo located data 
+
+First, let's see which district of NY has more shootings. 
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=BORO)) +
+  geom_point() + 
+  ggtitle("Shooting incidency in NY")
+```
+### By ethnicity
+
+What about my race in certain zones?
+
+#### Victim data
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=BORO)) +
+  geom_point() +
+  facet_wrap(~VIC_RACE) +
+  ggtitle("Victim etchnicity shooting data incidency by district in NY")
+```
+```{r}
+count_victims_by_race = nypd_dataframe %>%
+  group_by(VIC_RACE) %>%
+  summarize(count_victims = n()) %>%
+  arrange(count_victims) 
+count_victims_by_race
+```
+
+
+```{r}
+ggplot(count_victims_by_race, aes(x = VIC_RACE, y = count_victims)) + 
+  geom_bar(stat='identity') + 
+  theme(axis.text.x = element_text(angle = 75, vjust = 1, hjust=1)) + 
+  ggtitle("Victim etchnicity in shootings in NY")
+
+```
+This previous plot shows which races recieved more shootings in NY. To make a ratio based prediction it is possible to support this barplot with the total number of people in NY by each race. But this is isolated to this project.
+
+##### Age of victims and sex
+
+The next scatter plot shows that Male people around 18 to 44 years are more in danger to get shooted in NY.
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=VIC_AGE_GROUP)) +
+  geom_point() +
+  facet_wrap(~VIC_SEX) +
+  ggtitle("Victims of shootings' age and sex in NY")
+```
+##### Victims' Sex and Race
+
+Again looking at the victims ethnicity an sex, in the next plot you can see there are four ethnicities which are more victims of shootings (Hispanic Black, Hispanic White, Black, and White).
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=VIC_SEX)) +
+  geom_point() +
+  facet_wrap(~VIC_RACE) +
+  ggtitle("Victims of shootings' race and sex in NY")
+```
+##### Victims Age and Race
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=VIC_AGE_GROUP)) +
+  geom_point() +
+  facet_wrap(~VIC_RACE) +
+  ggtitle("Victims of shootings' race and age group in NY")
+```
+
+#### Shooter's data vs Victim's race
+
+The next plot could be interpreted by "which race is proned to get shoot by the races near by". This is unfair, but there are several assumptions you can assume looking it, but for ethic reasons we will not make any conclusion about it.
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=VIC_RACE)) +
+  geom_point() +
+  facet_wrap(~PERP_RACE) +
+  ggtitle("Shootings between races in NY")
+```
+##### Shooters by BORO
+
+The next plot shows which shooters are most common in each zone of NY.
+
+```{r}
+ggplot(nypd_dataframe, aes(x=Longitude, y=Latitude, color=PERP_RACE)) +
+  geom_point() +
+  facet_wrap(~BORO) +
+  ggtitle("Shooters by BORO in NY")
+```
+
+## Discusion
+
+There are several assumptions of the early visuallization. First, there are several important fields, such as BORO, Latitude, Longitude, etc, but we only consider for this study case BORO and Latitude and Longitude
+
+## Ethic Disclaimer
+
+Some insights of this data may make the people think some races are more violent than others. This is FALSE. The true interpretation is made by more than early visualization made with less data than others. There are several other sources of data such as money invested in some areas that are important to development a "District" which is dangerous or with the absurd idea "some race" is dangerous than other, which is not. In this case we use the available data with the end to predict which district is dangerous than other or the possibility you are in danger in a certain area of NY. I will not use etchtnicy data because I consider this as a bias, there are several other data which makes the possibility of get shoot and as we can see in the model development.
+
+## The danger button predictor
+
+We use a logistic regression for the predictor, and for educational purposes our target is if we are near or we are part of a shooting, we will survive to it. Specifically, we are talking to the column STATISTICAL_MURDER_FLAG.
+
+First let's replace char variables to factors.
+
+```{r}
+nypd_dataframe <- nypd_dataframe %>% 
+  mutate(VIC_SEX <- as.factor(VIC_SEX),
+         VIC_RACE <- as.factor(VIC_RACE),
+         VIC_AGE_GROUP <- as.factor(VIC_AGE_GROUP),
+         BORO <- as.factor(BORO)
+         )
+head(nypd_dataframe)
+```
+Next, let's cast the target to 1 or 0.
+
+
+```{r}
+labeler_murder <- function(val){
+  if(val == 'true'){
+    return(TRUE)
+  }
+  return(FALSE)
+}
+```
+
+```{r}
+nypd_dataframe <- nypd_dataframe %>%
+  mutate(STATISTICAL_MURDER_FLAG = sapply(STATISTICAL_MURDER_FLAG, labeler_murder))
+head(nypd_dataframe)
+```
+
+```{r}
+model <- glm(STATISTICAL_MURDER_FLAG ~ BORO + Latitude + Longitude + VIC_SEX + VIC_RACE + VIC_AGE_GROUP, data = nypd_dataframe, family = binomial)
+model
+```
+
+Finally let's evaluate supposing if I am walking around New York.
+
+```{r}
+df_test <- data.frame(BORO = c("STATEN ISLAND", "BROOKLYN", "QUEENS", "MANHATTAN"),
+                 Longitude = c(-74.15, -74, -73.8, -74),
+                 Latitude = c(40.6, 40.6, 40.7, 40.8), 
+                 VIC_SEX = c("M", "M", "M", "M"),
+                 VIC_RACE = c("WHITE HISPANIC", "WHITE HISPANIC", "WHITE HISPANIC", "WHITE HISPANIC"),
+                 VIC_AGE_GROUP = c("25-44", "25-44", "25-44", "25-44"))
+df_test <- df_test %>% 
+  mutate(BORO = as.factor(BORO),
+         VIC_SEX = as.factor(VIC_SEX),
+         VIC_RACE = as.factor(VIC_RACE),
+         VIC_AGE_GROUP = as.factor(VIC_AGE_GROUP)
+         )
+```
+
+```{r}
+probabilities <- model %>% predict(df_test, type = "response")
+predicted_my_walk_to_NY <- ifelse(probabilities > 0.5, "High Probability to get shoot", "Low Probability to get shoot")
+predicted_my_walk_to_NY
+```
+Hey look! In my travel to New York I didn't die by shooting.
