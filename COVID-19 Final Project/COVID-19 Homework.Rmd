@@ -1,0 +1,557 @@
+---
+title: "COVID-19 Homework"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# COVID-19 Analysis
+
+In this analysis based on the analysis seen in class, I will predict deaths by thousands in the COVID-19 pandemy based on the positive cases in the countries of US and Peru.
+
+## Libraries to use
+
+```{r imports, echo=FALSE}
+library(tidyverse)
+library(stringr)
+library(lubridate)
+```
+## Dataset importing
+
+First of all, lets import the dataset of COVID-19 from source. In this case I will import the US only dataset, and the global dataset.
+
+```{r var_urls, message=FALSE}
+url_base = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names = c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv",  "time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+
+urls = str_c(url_base, file_names)
+```
+
+Next, I will import the dataframes in the in the R editor.
+
+```{r joining_names, message=FALSE}
+global_cases = read_csv(urls[1])
+global_deaths = read_csv(urls[2]) 
+US_cases = read_csv(urls[3])
+US_deaths = read_csv(urls[4])
+```
+
+Let's explore a little bit the data.
+
+```{r pivoting_us_cases}
+US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  head()
+```
+
+First, pivoting the table.
+
+```{r us_fixed_pivot}
+US_cases = US_cases %>% 
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+```
+
+And then watching the result in the US Cases.
+
+```{r print_us_cases_1}
+tail(US_cases)
+```
+
+Now, let's pivot the deaths Data Frame.
+
+```{r us_deaths_pivoting}
+US_deaths = US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+```
+
+And then seeing what is the result.
+
+```{r print_us_deaths_1}
+head(US_deaths)
+```
+### Joining Cases and Deaths
+
+```{r us_joining}
+US = US_cases %>%
+  full_join(US_deaths)
+```
+
+And, let's see how it looks!
+
+```{r printing_us}
+head(US)
+```
+
+### Overview of how are the results
+
+```{r uid_url}
+uid_url_lookup = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv'
+
+uid = read_csv(uid_url_lookup) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+uid
+```
+
+## US Visualizing
+
+First of all we need to formatting the deaths by million, so in the way to achieve it we need to execute the next cell.
+
+```{r US_visualizing} 
+US_by_state = US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths), 
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+head(US_by_state)
+```
+
+And, again, let's do it with the other Data Frame, of US totals.
+
+```{r us_totals}
+US_totals = US_by_state %>%
+  group_by(Country_Region, date)  %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Country_Region, date, 
+         cases, deaths, deaths_per_mill, Population)  %>%
+  ungroup()
+
+head(US_totals)
+```
+
+#### Visualizing the data
+
+First US as a country
+
+```{r ggplot_us_totals}
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases") ) +
+  geom_point(aes(color = "cases")) + 
+  geom_line(aes(y = deaths, color = "deaths")) + 
+  geom_point(aes(y = deaths, color = "deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in US", y=NULL)
+```
+
+#### COVID-19 in New York plot
+
+Let's see some states of US individually.
+
+First, our week 3 project city NY.
+
+```{r ggplot_ny}
+state = "New York"
+
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases") ) +
+  geom_point(aes(color = "cases")) + 
+  geom_line(aes(y = deaths, color = "deaths")) + 
+  geom_point(aes(y = deaths, color = "deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in New York", y=NULL)
+```
+Interesting, but now we need the new cases. Let's make a new column with the US_by_state and US_totals Data Frames.
+
+```{r transform_analysis_1}
+US_by_state = US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+US_totals = US_totals %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+```
+
+And then seen how the data looks like.
+
+```{r tail_analysis_2}
+tail(US_totals %>% select(new_cases, new_deaths, everything()))
+```
+
+And now, let's watch the behavior of the new cases across the time for all the US.
+
+```{r plot_analysis_3}
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) + 
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in US", y = NULL)
+```
+
+What about the state of Colorado? Let's watch it.
+
+```{r plot_analysis_4}
+state = "Colorado"
+
+US_by_state %>%
+  filter(Province_State == state) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) + 
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in Colorado US", y = NULL)
+```
+
+Finally, let's create new columns based on the deaths, population, cases, and cases per thousands and also deaths per thousands.
+
+```{r us_state_totals_analysis_5}
+US_state_totals = US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000 * cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>%
+  filter(cases > 0, population > 0)
+```
+
+And then seen the tail of this data.
+
+```{r slice_min_analysis_6}
+US_state_totals %>%
+  slice_min(deaths_per_thou, n = 10)  %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+```{r slice_max_analysis_7}
+US_state_totals %>%
+  slice_max(deaths_per_thou, n=10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+
+## Create a linear model for the US
+
+First, let's train this model. We want to predict the deaths based on the cases per thousands.
+
+```{r modeling_1}
+mod = lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+```
+Again we want to see the minimum number of cases and the maximum number of cases, because our model will work with these points.
+
+```{r modeling_2}
+US_state_totals %>% slice_min(cases_per_thou)
+```
+
+
+```{r modeling_3}
+US_state_totals %>% slice_max(cases_per_thou)
+```
+
+And then let's predict the deaths with our model.
+
+```{r modeling_4}
+tail(US_state_totals %>% mutate(pred = predict(mod)))
+```
+
+And then creating a Data Frame
+
+```{r modeling_5}
+US_st_totals_w_pred = US_state_totals %>% mutate(pred = predict(mod))
+tail(US_st_totals_w_pred)
+```
+
+### Visualizing the prediction for the US
+
+```{r modeling_6}
+US_st_totals_w_pred %>%
+  ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") +
+  geom_line(aes(x = cases_per_thou, y = pred), color = "red")
+```
+
+## Global cases - In concrete Peru
+
+For the case of Peru, I want to make something different. I want to see the future of the possitive cases. We use the function lag in the case of US, so the main idea is: "Based in the previous week, what will be the expected possitive cases for today?"
+
+```{r tidy_global_cases, message=FALSE}
+global_cases = global_cases %>%
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+```
+
+
+```{r tidy_global_deaths, message=FALSE}
+global_deaths = global_deaths %>%
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+```
+
+```{r joiningglobal} 
+global = global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State')  %>%
+  mutate(date =mdy(date))
+```
+
+```{r summary_global}
+summary(global)
+```
+
+```{r filtering_only_possitive_cases}
+global = global %>% filter(cases > 0)
+```
+
+```{r filter_28M}
+global %>% filter(cases > 28000000)
+```
+
+
+```{r global_unite}
+global = global %>%
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        sep=", ",
+        na.rm = TRUE,
+        remove = FALSE)
+tail(global)
+```
+
+
+```{r joining_global_with_uid}
+global = global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+```
+
+```{r}
+tail(global)
+```
+
+We have the same problem of the US data, the possitive cases and the deaths are adding with the previous deaths. But in this case we are only interested in Peru, so we will start filtering it
+
+```{r}
+Peru_df = global %>%
+  filter(Country_Region == 'Peru')
+head(Peru_df)
+```
+
+Let's clean it a bit.
+
+```{r}
+Peru_df = Peru_df %>%
+  filter(!(is.nan(cases)), !(is.nan(deaths)))
+head(Peru_df)
+```
+
+Then getting the new cases and deaths.
+
+```{r}
+Peru_df = Peru_df %>%
+  arrange(date) %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths),
+         previous_data = "Previous")
+```
+
+### Visualizing Cases and Deaths in Peru
+
+```{r}
+Peru_df %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) + 
+  geom_point(aes(y = new_deaths, color = "new_deaths")) + 
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in Peru", y = NULL)
+```
+
+In this case we dont need neither cases and deaths per thousands.
+
+Now we need the previous seven days on each row.
+
+```{r}
+Peru_df = Peru_df %>%
+  mutate(n_deaths_1 = lag(new_deaths,1),
+         n_deaths_2 = lag(new_deaths,2),
+         n_deaths_3 = lag(new_deaths,3),
+         n_deaths_4 = lag(new_deaths,4),
+         n_deaths_5 = lag(new_deaths,5),
+         n_deaths_6 = lag(new_deaths,6),
+         n_deaths_7 = lag(new_deaths,7), 
+         n_cases_1 = lag(new_cases,1),
+         n_cases_2 = lag(new_cases,2),
+         n_cases_3 = lag(new_cases,3),
+         n_cases_4 = lag(new_cases,4),
+         n_cases_5 = lag(new_cases,5),
+         n_cases_6 = lag(new_cases,6),
+         n_cases_7 = lag(new_cases,7))
+```
+
+### Training the COVID-19 cases and deaths models
+
+```{r}
+mod_cases_Peru = lm(new_cases ~ n_deaths_1 +
+                      n_deaths_2 +
+                      n_deaths_3 +
+                      n_deaths_4 +
+                      n_deaths_5 +
+                      n_deaths_6 +
+                      n_deaths_7 +
+                      n_cases_1 +
+                      n_cases_2 +
+                      n_cases_3 +
+                      n_cases_4 +
+                      n_cases_5 +
+                      n_cases_6 + 
+                      n_cases_7, data = Peru_df)
+summary(mod_cases_Peru)
+```
+
+```{r}
+mod_deaths_Peru = lm(new_deaths ~ n_deaths_1 +
+                      n_deaths_2 +
+                      n_deaths_3 +
+                      n_deaths_4 +
+                      n_deaths_5 +
+                      n_deaths_6 +
+                      n_deaths_7 +
+                      n_cases_1 +
+                      n_cases_2 +
+                      n_cases_3 +
+                      n_cases_4 +
+                      n_cases_5 +
+                      n_cases_6 + 
+                      n_cases_7, data = Peru_df)
+summary(mod_deaths_Peru)
+```
+
+### Predicting next 100 days in COVID-19 Pandemy
+
+First, let's make an early prediction of all Peru df.
+
+
+
+```{r}
+Peru_df = tail(Peru_df, nrow(Peru_df) - 8)
+Peru_df = Peru_df %>%
+  mutate(predict_new_cases = predict(mod_cases_Peru), 
+         predict_new_deaths = predict(mod_deaths_Peru))
+tail(Peru_df)
+```
+
+Getting the iterator of each column
+
+```{r}
+i = as.integer(1)
+for(col in names(Peru_df)){
+  print(paste(as.character(i), " " , col))
+  i = i + 1
+}
+```
+
+```{r}
+for(i in 1:100){
+  tail_Peru_df = tail(Peru_df, 10)
+  temp_df = tail(tail_Peru_df, 1)
+  
+  temp_df[10][1] = "Predictor"
+  head(temp_df)
+  temp_df[3][1] = max(Peru_df$date) + days(1)
+  temp_df[8][1] = temp_df[25][1]
+  temp_df[9][1] = temp_df[26][1]
+  ## Concating
+  temp_df_Peru = rbind(tail_Peru_df, temp_df)
+  ## formating
+  temp_df_Peru = temp_df_Peru %>%
+    mutate(n_deaths_1 = lag(new_deaths,1),
+         n_deaths_2 = lag(new_deaths,2),
+         n_deaths_3 = lag(new_deaths,3),
+         n_deaths_4 = lag(new_deaths,4),
+         n_deaths_5 = lag(new_deaths,5),
+         n_deaths_6 = lag(new_deaths,6),
+         n_deaths_7 = lag(new_deaths,7), 
+         n_cases_1 = lag(new_cases,1),
+         n_cases_2 = lag(new_cases,2),
+         n_cases_3 = lag(new_cases,3),
+         n_cases_4 = lag(new_cases,4),
+         n_cases_5 = lag(new_cases,5),
+         n_cases_6 = lag(new_cases,6),
+         n_cases_7 = lag(new_cases,7))
+  ## Getting the new last row again
+  tail_of_the_first_Peru_df = tail(temp_df_Peru, 1)
+  tail(tail_of_the_first_Peru_df)
+  tail_of_the_first_Peru_df = tail_of_the_first_Peru_df %>%
+                    mutate(predict_new_cases = predict(mod_cases_Peru, tail_of_the_first_Peru_df), 
+                         predict_new_deaths = predict(mod_deaths_Peru, tail_of_the_first_Peru_df))
+  ## pasting to the Peru_df
+  Peru_df = rbind(Peru_df, tail_of_the_first_Peru_df)
+}
+```
+
+### Visualizing the predictions and the data in the last 300 days
+
+First with cases:
+
+```{r}
+tail(Peru_df,300) %>% ggplot(aes(x=date, y = new_cases, color = previous_data)) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("COVID-19 cases in Peru, and the expected behavior in the next 100 days")
+```
+
+And then with deaths.
+
+
+
+```{r}
+tail(Peru_df,300) %>% ggplot(aes(x=date, y = new_deaths, color = previous_data)) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("COVID-19 deaths in Peru, and the expected behavior in the next 100 days")
+```
+
+
+That's all folks!
